@@ -24,12 +24,12 @@ public class BookingController {
     @Autowired
     private BookingService bookingService;
 
-    @PostMapping("/booking/{flightId}")
+    @PostMapping("/booking/{id}")
     public Mono<ResponseEntity<Ticket>> bookFlight(
-            @PathVariable String flightId,
+            @PathVariable String id,
             @Valid @RequestBody BookingRequest bookingRequest) {
 
-        return bookingService.bookFlight(flightId, bookingRequest)
+        return bookingService.bookFlight(id, bookingRequest)
                 .map(ResponseEntity::ok);
     }
 

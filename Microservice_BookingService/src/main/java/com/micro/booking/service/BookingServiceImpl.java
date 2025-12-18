@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import com.micro.booking.client.FlightClient;
@@ -16,11 +17,12 @@ import com.micro.booking.requests.BookingRequest;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @Service
 public class BookingServiceImpl implements BookingService {
 
-    @Autowired
+	@Autowired
     private TicketRepository ticketRepository;
 
     @Autowired
@@ -30,8 +32,7 @@ public class BookingServiceImpl implements BookingService {
     public Mono<Ticket> bookFlight(String flightId, BookingRequest bookingRequest) {
 
         return Mono.fromCallable(() -> flightClient.getFlightById(flightId))
-                .switchIfEmpty(Mono.error(
-                        new ResourceNotFoundException("Flight not found")))
+                .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(flight -> {
 
                     int requestedSeats = bookingRequest.getTotalSeats();
@@ -44,10 +45,8 @@ public class BookingServiceImpl implements BookingService {
                     Ticket ticket = new Ticket();
                     ticket.setPnr(generatePNR());
                     ticket.setFlightId(flightId);
-
-                    ticket.setCustomerName(bookingRequest.getName());
-                    ticket.setCustomerEmail(bookingRequest.getEmail());
-
+                    ticket.setCustomerName(bookingRequest.getCustomerName());
+                    ticket.setCustomerEmail(bookingRequest.getCustomerEmail());
                     ticket.setNumSeats(requestedSeats);
                     ticket.setMealpref(bookingRequest.getMealpref());
                     ticket.setSeatNumber(bookingRequest.getSeatNumber());
@@ -63,12 +62,15 @@ public class BookingServiceImpl implements BookingService {
                         );
                     }
 
-                    flightClient.updateAvailableSeats(
-                            flightId,
-                            flight.getAvailableSeats() - requestedSeats
-                    );
-
-                    return ticketRepository.save(ticket);
+                    return Mono.fromCallable(() -> {
+                                flightClient.updateAvailableSeats(
+                                        flightId,
+                                        flight.getAvailableSeats() - requestedSeats
+                                );
+                                return ticket;
+                            })
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .flatMap(ticketRepository::save);
                 });
     }
 
@@ -91,8 +93,14 @@ public class BookingServiceImpl implements BookingService {
                 .switchIfEmpty(Mono.error(
                         new ResourceNotFoundException("Ticket not found with PNR: " + pnr)))
                 .flatMap(ticket ->
-                        Mono.fromCallable(() -> flightClient.getFlightById(ticket.getFlightId()))
+                        Mono.fromCallable(() ->
+                                flightClient.getFlightById(ticket.getFlightId()))
                                 .flatMap(flight -> {
+
+                                    if (flight == null) {
+                                        return Mono.error(
+                                                new ResourceNotFoundException("Flight not found"));
+                                    }
 
                                     if (LocalDateTime.now().plusHours(24)
                                             .isAfter(flight.getDeparture())) {
@@ -102,16 +110,18 @@ public class BookingServiceImpl implements BookingService {
 
                                     ticket.setStatus("CANCELLED");
 
-                                    flightClient.updateAvailableSeats(
-                                            flight.getId(),
-                                            flight.getAvailableSeats() + ticket.getNumSeats()
-                                    );
-
-                                    return ticketRepository.save(ticket)
+                                    return Mono.fromRunnable(() ->
+                                                    flightClient.updateAvailableSeats(
+                                                            flight.getId(),
+                                                            flight.getAvailableSeats()
+                                                                    + ticket.getNumSeats()
+                                                    ))
+                                            .then(ticketRepository.save(ticket))
                                             .thenReturn("Ticket cancelled successfully");
                                 })
                 );
     }
+
 
     private String generatePNR() {
         return UUID.randomUUID().toString()

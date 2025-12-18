@@ -19,11 +19,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class BookingRequest {
 	@NotBlank(message="Name is required")
-    private String name;
+    private String customerName;
 
     @NotBlank(message="Email is required")
     @Email(message="Invalid email")
-    private String email;
+    private String customerEmail;
 
     @NotNull(message="Number of seats required")
     @Min(value=1,message="At least 1 seat required")

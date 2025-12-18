@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import com.micro.booking.entity.MealType;
@@ -25,13 +26,13 @@ import lombok.NoArgsConstructor;
 public class Ticket {
 	@Id
     private String pnr;
-
-    private String userId; 
+    
     @NotBlank
     private String customerName;
 
     @Email
     @NotBlank
+    @Indexed
     private String customerEmail;
     
     private String flightId;    

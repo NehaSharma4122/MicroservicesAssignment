@@ -8,15 +8,17 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import com.micro.booking.requests.FlightRequest;
 
+import reactor.core.publisher.Mono;
+
 @FeignClient(name = "flight-service", url = "${flight.service.url}")
 public interface FlightClient {
 
-    @GetMapping("/flights/{id}")
-    FlightRequest getFlightById(@PathVariable String id);
+    @GetMapping("/flights/{flightId}")
+    FlightRequest getFlightById(@PathVariable("flightId") String flightId);
 
-    @PutMapping("/flights/{id}/seats")
+    @PutMapping("/flights/{flightId}/seats/{seats}")
     void updateAvailableSeats(
-            @PathVariable String id,
-            @RequestParam int seats
+            @PathVariable("flightId") String flightId,
+            @PathVariable("seats") int seats
     );
 }
