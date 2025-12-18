@@ -1,5 +1,6 @@
 package com.micro.booking.entity;
 
+import org.hibernate.validator.constraints.UUID;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -16,7 +17,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Document(collection = "passenger")
 public class Passenger {
-	@Id
+	@UUID
     private String id;
 
     @NotBlank

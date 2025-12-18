@@ -1,16 +1,13 @@
 package com.micro.booking.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import com.micro.booking.entity.Ticket;
+import com.micro.booking.exception.ResourceNotFoundException;
+import com.micro.booking.exception.UnprocessableException;
 import com.micro.booking.requests.BookingRequest;
 import com.micro.booking.service.BookingService;
 
@@ -21,32 +18,54 @@ import reactor.core.publisher.Mono;
 @RestController
 @RequestMapping("/api/flight")
 public class BookingController {
+
     @Autowired
     private BookingService bookingService;
 
-    @PostMapping("/booking/{id}")
-    public Mono<ResponseEntity<Ticket>> bookFlight(
-            @PathVariable String id,
+    @PostMapping("/booking/{flightId}")
+    public Mono<ResponseEntity<Object>> bookFlight(
+            @PathVariable String flightId,
             @Valid @RequestBody BookingRequest bookingRequest) {
-
-        return bookingService.bookFlight(id, bookingRequest)
-                .map(ResponseEntity::ok);
+        return bookingService.bookFlight(flightId, bookingRequest)
+                .map(ticket -> ResponseEntity.status(HttpStatus.CREATED).body((Object) ticket))
+                .onErrorResume(ResourceNotFoundException.class, 
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())))
+                .onErrorResume(UnprocessableException.class, 
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(e.getMessage())))
+                .onErrorResume(Exception.class, 
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An error occurred: " + e.getMessage())));
     }
 
     @GetMapping("/ticket/{pnr}")
-    public Mono<ResponseEntity<Ticket>> getTicket(@PathVariable String pnr) {
+    public Mono<ResponseEntity<Object>> getTicket(@PathVariable String pnr) {
         return bookingService.getTicketByPnr(pnr)
-                .map(ResponseEntity::ok);
+                .map(ticket -> ResponseEntity.ok((Object) ticket))
+                .onErrorResume(ResourceNotFoundException.class, 
+                    // Use .body() instead of .build() to see the message
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())));
     }
 
     @GetMapping("/booking/history/{emailId}")
-    public Flux<Ticket> getBookingHistory(@PathVariable String emailId) {
-        return bookingService.getBookingHistory(emailId);
+    public Mono<ResponseEntity<Object>> getBookingHistory(@PathVariable String emailId) {
+        return bookingService.getBookingHistory(emailId)
+            .collectList() // Collect Flux to List to check if empty
+            .flatMap(tickets -> {
+                if (tickets.isEmpty()) {
+                    return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                            .body("No booking history found for email: " + emailId));
+                } else {
+                    return Mono.just(ResponseEntity.ok((Object) tickets));
+                }
+            });
     }
 
     @DeleteMapping("/booking/cancel/{pnr}")
     public Mono<ResponseEntity<String>> cancelTicket(@PathVariable String pnr) {
         return bookingService.cancelTicket(pnr)
-                .map(ResponseEntity::ok);
+                .map(ResponseEntity::ok)
+                .onErrorResume(ResourceNotFoundException.class, 
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())))
+                .onErrorResume(UnprocessableException.class, 
+                    e -> Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(e.getMessage())));
     }
 }

@@ -2,9 +2,9 @@ package com.micro.booking.service;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import com.micro.booking.client.FlightClient;
@@ -22,7 +22,7 @@ import reactor.core.scheduler.Schedulers;
 @Service
 public class BookingServiceImpl implements BookingService {
 
-	@Autowired
+    @Autowired
     private TicketRepository ticketRepository;
 
     @Autowired
@@ -30,18 +30,29 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public Mono<Ticket> bookFlight(String flightId, BookingRequest bookingRequest) {
-
-        return Mono.fromCallable(() -> flightClient.getFlightById(flightId))
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(flight -> {
+    	return Mono.fromCallable(() -> {
+		            try {
+		                return flightClient.getFlightById(flightId);
+		            } catch (Exception e) {
+		       
+		                throw new ResourceNotFoundException("Flight not found with ID: " + flightId);
+		            }
+		        })
+		        .subscribeOn(Schedulers.boundedElastic())
+		        .flatMap(flight -> {
+		            if (flight == null || flight.getId() == null) {
+		                return Mono.error(new ResourceNotFoundException("Flight not found with ID: " + flightId));
+		            }
 
                     int requestedSeats = bookingRequest.getTotalSeats();
 
                     if (flight.getAvailableSeats() < requestedSeats) {
-                        return Mono.error(
-                                new UnprocessableException("Not enough seats available"));
+                        return Mono.error(new UnprocessableException(
+                                "Not enough seats available. Requested: " + requestedSeats 
+                                + ", available: " + flight.getAvailableSeats()));
                     }
 
+                    // Build the ticket
                     Ticket ticket = new Ticket();
                     ticket.setPnr(generatePNR());
                     ticket.setFlightId(flightId);
@@ -54,86 +65,83 @@ public class BookingServiceImpl implements BookingService {
                     ticket.setStatus("CONFIRMED");
 
                     if (bookingRequest.getPassenger() != null) {
-                        ticket.setPassenger(
-                                bookingRequest.getPassenger()
-                                        .stream()
-                                        .map(this::convertToPassenger)
-                                        .toList()
-                        );
+                        ticket.setPassenger(bookingRequest.getPassenger().stream()
+                                .map(this::convertToPassenger)
+                                .toList());
                     }
 
                     return Mono.fromCallable(() -> {
-                                flightClient.updateAvailableSeats(
-                                        flightId,
-                                        flight.getAvailableSeats() - requestedSeats
-                                );
-                                return ticket;
-                            })
-                            .subscribeOn(Schedulers.boundedElastic())
-                            .flatMap(ticketRepository::save);
-                });
+                        flightClient.updateAvailableSeats(flightId, flight.getAvailableSeats() - requestedSeats);
+                        return ticket;
+                    })
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .flatMap(ticketRepository::save);
+        });
     }
 
     @Override
     public Mono<Ticket> getTicketByPnr(String pnr) {
-        return ticketRepository.findByPnr(pnr)
-                .switchIfEmpty(Mono.error(
-                        new ResourceNotFoundException("Ticket not found with PNR: " + pnr)));
+        if (pnr == null || pnr.trim().isEmpty()) {
+            return Mono.error(new ResourceNotFoundException("PNR cannot be null or empty"));
+        }
+        return ticketRepository.findByPnr(pnr.trim())
+                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Ticket not found with PNR: " + pnr)));
     }
 
     @Override
     public Flux<Ticket> getBookingHistory(String email) {
-        return ticketRepository.findByCustomerEmail(email);
+        if (email == null || email.trim().isEmpty()) {
+            return Flux.empty();
+        }
+        return ticketRepository.findByCustomerEmail(email.trim());
     }
 
     @Override
     public Mono<String> cancelTicket(String pnr) {
+        if (pnr == null || pnr.trim().isEmpty()) {
+            return Mono.error(new ResourceNotFoundException("PNR cannot be null or empty"));
+        }
 
-        return ticketRepository.findByPnr(pnr)
-                .switchIfEmpty(Mono.error(
-                        new ResourceNotFoundException("Ticket not found with PNR: " + pnr)))
-                .flatMap(ticket ->
-                        Mono.fromCallable(() ->
-                                flightClient.getFlightById(ticket.getFlightId()))
-                                .flatMap(flight -> {
+        return ticketRepository.findByPnr(pnr.trim())
+                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Ticket not found with PNR: " + pnr)))
+                .flatMap(ticket -> 
+                    Mono.fromCallable(() -> {
+                        try {
+                            return flightClient.getFlightById(ticket.getFlightId());
+                        } catch (Exception e) {
+                            throw new ResourceNotFoundException("Flight associated with this ticket no longer exists.");
+                        }
+                    })
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .flatMap(flight -> {
+                        if (LocalDateTime.now().plusHours(24).isAfter(flight.getDeparture())) {
+                            return Mono.error(new UnprocessableException(
+                                "Cancellation not allowed within 24 hours of departure"));
+                        }
 
-                                    if (flight == null) {
-                                        return Mono.error(
-                                                new ResourceNotFoundException("Flight not found"));
-                                    }
-
-                                    if (LocalDateTime.now().plusHours(24)
-                                            .isAfter(flight.getDeparture())) {
-                                        return Mono.error(new UnprocessableException(
-                                                "Cancellation not allowed within 24 hours of departure"));
-                                    }
-
-                                    ticket.setStatus("CANCELLED");
-
-                                    return Mono.fromRunnable(() ->
-                                                    flightClient.updateAvailableSeats(
-                                                            flight.getId(),
-                                                            flight.getAvailableSeats()
-                                                                    + ticket.getNumSeats()
-                                                    ))
-                                            .then(ticketRepository.save(ticket))
-                                            .thenReturn("Ticket cancelled successfully");
+                        ticket.setStatus("CANCELLED");
+                        return Mono.fromCallable(() -> {
+                                    flightClient.updateAvailableSeats(
+                                        flight.getId(), 
+                                        flight.getAvailableSeats() + ticket.getNumSeats()
+                                    );
+                                    return ticket;
                                 })
+                                .subscribeOn(Schedulers.boundedElastic())
+                                .flatMap(ticketRepository::save)
+                                .thenReturn("Ticket cancelled successfully");
+                    })
                 );
     }
-
-
     private String generatePNR() {
-        return UUID.randomUUID().toString()
-                .substring(0, 8)
-                .toUpperCase();
+        return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     private Passenger convertToPassenger(Passenger req) {
-        Passenger p = new Passenger();
-        p.setName(req.getName());
-        p.setGender(req.getGender());
-        p.setAge(req.getAge());
-        return p;
+        Passenger passenger = new Passenger();
+        passenger.setName(req.getName());
+        passenger.setGender(req.getGender());
+        passenger.setAge(req.getAge());
+        return passenger;
     }
 }
