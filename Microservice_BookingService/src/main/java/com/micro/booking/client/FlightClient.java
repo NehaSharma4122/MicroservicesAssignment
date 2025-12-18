@@ -10,7 +10,9 @@ import com.micro.booking.requests.FlightRequest;
 
 import reactor.core.publisher.Mono;
 
-@FeignClient(name = "flight-service", url = "${flight.service.url}")
+@FeignClient(name = "flight-service",
+url = "${flight.service.url}",
+fallbackFactory = FlightFallbackFactory.class)
 public interface FlightClient {
 
     @GetMapping("/flights/{flightId}")
