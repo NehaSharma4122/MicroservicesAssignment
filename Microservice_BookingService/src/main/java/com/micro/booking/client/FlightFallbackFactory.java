@@ -16,8 +16,6 @@ public class FlightFallbackFactory implements FallbackFactory<FlightClient> {
             @Override
             public FlightRequest getFlightById(String flightId) {
                 log.error("Error calling Flight Service for ID {}: {}", flightId, cause.getMessage());
-                // Instead of returning a null/empty object (which causes "scanAvailable: true" issues)
-                // we throw an exception so the user knows the service is unavailable.
                 throw new RuntimeException("Flight Service is currently unavailable. Please try again later.");
             }
 

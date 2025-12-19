@@ -43,14 +43,13 @@ public class BookingController {
         return bookingService.getTicketByPnr(pnr)
                 .map(ticket -> ResponseEntity.ok((Object) ticket))
                 .onErrorResume(ResourceNotFoundException.class, 
-                    // Use .body() instead of .build() to see the message
                     e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())));
     }
 
     @GetMapping("/booking/history/{emailId}")
     public Mono<ResponseEntity<Object>> getBookingHistory(@PathVariable String emailId) {
         return bookingService.getBookingHistory(emailId)
-            .collectList() // Collect Flux to List to check if empty
+            .collectList() 
             .flatMap(tickets -> {
                 if (tickets.isEmpty()) {
                     return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
