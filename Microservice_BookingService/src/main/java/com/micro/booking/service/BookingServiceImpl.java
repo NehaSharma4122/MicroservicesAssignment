@@ -10,8 +10,10 @@ import org.springframework.stereotype.Service;
 import com.micro.booking.client.FlightClient;
 import com.micro.booking.entity.Passenger;
 import com.micro.booking.entity.Ticket;
+import com.micro.booking.event.BookingEvent;
 import com.micro.booking.exception.ResourceNotFoundException;
 import com.micro.booking.exception.UnprocessableException;
+import com.micro.booking.kafka.BookingEventProducer;
 import com.micro.booking.repository.TicketRepository;
 import com.micro.booking.requests.BookingRequest;
 
@@ -27,6 +29,9 @@ public class BookingServiceImpl implements BookingService {
 
     @Autowired
     private FlightClient flightClient;
+
+    @Autowired
+    private BookingEventProducer bookingEventProducer;
 
     @Override
     public Mono<Ticket> bookFlight(String flightId, BookingRequest bookingRequest) {
@@ -52,7 +57,6 @@ public class BookingServiceImpl implements BookingService {
                                 + ", available: " + flight.getAvailableSeats()));
                     }
 
-                    // Build the ticket
                     Ticket ticket = new Ticket();
                     ticket.setPnr(generatePNR());
                     ticket.setFlightId(flightId);
@@ -75,7 +79,20 @@ public class BookingServiceImpl implements BookingService {
                         return ticket;
                     })
                     .subscribeOn(Schedulers.boundedElastic())
-                    .flatMap(ticketRepository::save);
+                    .flatMap(savedTicket -> {
+	                        bookingEventProducer.sendBookingEvent(
+	                            new BookingEvent(
+	                                "BOOKED",
+	                                savedTicket.getPnr(),
+	                                savedTicket.getCustomerEmail(),
+	                                savedTicket.getFlightId(),
+	                                savedTicket.getNumSeats(),
+	                                LocalDateTime.now()
+	                            )
+	                      );
+	                     return Mono.just(savedTicket);
+                    });
+                        
         });
     }
 
@@ -128,8 +145,22 @@ public class BookingServiceImpl implements BookingService {
                                     return ticket;
                                 })
                                 .subscribeOn(Schedulers.boundedElastic())
-                                .flatMap(ticketRepository::save)
-                                .thenReturn("Ticket cancelled successfully");
+                                .flatMap(savedTicket -> {
+
+                                    bookingEventProducer.sendBookingEvent(
+                                        new BookingEvent(
+                                            "CANCELLED",
+                                            savedTicket.getPnr(),
+                                            savedTicket.getCustomerEmail(),
+                                            savedTicket.getFlightId(),
+                                            savedTicket.getNumSeats(),
+                                            LocalDateTime.now()
+                                        )
+                                    );
+
+                                    return Mono.just("Ticket cancelled successfully");
+                                });
+
                     })
                 );
     }
