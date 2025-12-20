@@ -28,12 +28,12 @@ public class BookingController {
             @Valid @RequestBody BookingRequest bookingRequest) {
         return bookingService.bookFlight(flightId, bookingRequest)
                 .map(ticket -> ResponseEntity.status(HttpStatus.CREATED).body((Object) ticket))
+                .onErrorResume(ResourceNotFoundException.class, 
+                        e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())))
+                .onErrorResume(UnprocessableException.class, 
+                        e -> Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(e.getMessage())))
                 .onErrorResume(RuntimeException.class, 
                 	    e -> Mono.just(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(e.getMessage())))
-                .onErrorResume(ResourceNotFoundException.class, 
-                    e -> Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage())))
-                .onErrorResume(UnprocessableException.class, 
-                    e -> Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(e.getMessage())))
                 .onErrorResume(Exception.class, 
                     e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An error occurred: " + e.getMessage())));
     }

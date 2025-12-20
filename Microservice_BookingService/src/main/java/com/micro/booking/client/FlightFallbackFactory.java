@@ -2,6 +2,10 @@ package com.micro.booking.client;
 
 import com.micro.booking.exception.ResourceNotFoundException;
 import com.micro.booking.requests.FlightRequest;
+
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import jakarta.ws.rs.ServiceUnavailableException;
+
 import org.springframework.cloud.openfeign.FallbackFactory;
 import org.springframework.stereotype.Component;
 import lombok.extern.slf4j.Slf4j;
@@ -16,13 +20,13 @@ public class FlightFallbackFactory implements FallbackFactory<FlightClient> {
             @Override
             public FlightRequest getFlightById(String flightId) {
                 log.error("Error calling Flight Service for ID {}: {}", flightId, cause.getMessage());
-                throw new RuntimeException("Flight Service is currently unavailable. Please try again later.");
+                throw new ServiceUnavailableException("Flight Service is currently unavailable. Please try again later.");
             }
-
+            
             @Override
             public void updateAvailableSeats(String flightId, int seats) {
                 log.error("Error updating seats for ID {}: {}", flightId, cause.getMessage());
-                throw new RuntimeException("Unable to update seats at this time.");
+                throw new ServiceUnavailableException("Unable to update seats at this time.");
             }
         };
     }

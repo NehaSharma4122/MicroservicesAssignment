@@ -35,26 +35,28 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public Mono<Ticket> bookFlight(String flightId, BookingRequest bookingRequest) {
-    	return Mono.fromCallable(() -> {
-		            try {
-		                return flightClient.getFlightById(flightId);
-		            } catch (Exception e) {
-		       
-		                throw new ResourceNotFoundException("Flight not found with ID: " + flightId);
-		            }
-		        })
-		        .subscribeOn(Schedulers.boundedElastic())
-		        .flatMap(flight -> {
-		            if (flight == null || flight.getId() == null) {
-		                return Mono.error(new ResourceNotFoundException("Flight not found with ID: " + flightId));
-		            }
+
+        return Mono.fromCallable(() -> {
+                    try {
+                        return flightClient.getFlightById(flightId);
+                    } catch (Exception e) {
+                        throw new ResourceNotFoundException("Flight not found with ID: " + flightId);
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+
+                .flatMap(flight -> {
+                    if (flight == null || flight.getId() == null) {
+                        return Mono.error(new ResourceNotFoundException(
+                                "Flight not found with ID: " + flightId));
+                    }
 
                     int requestedSeats = bookingRequest.getTotalSeats();
 
                     if (flight.getAvailableSeats() < requestedSeats) {
                         return Mono.error(new UnprocessableException(
-                                "Not enough seats available. Requested: " + requestedSeats 
-                                + ", available: " + flight.getAvailableSeats()));
+                                "Not enough seats available. Requested: " + requestedSeats +
+                                ", available: " + flight.getAvailableSeats()));
                     }
 
                     Ticket ticket = new Ticket();
@@ -69,32 +71,37 @@ public class BookingServiceImpl implements BookingService {
                     ticket.setStatus("CONFIRMED");
 
                     if (bookingRequest.getPassenger() != null) {
-                        ticket.setPassenger(bookingRequest.getPassenger().stream()
-                                .map(this::convertToPassenger)
-                                .toList());
+                        ticket.setPassenger(
+                                bookingRequest.getPassenger()
+                                        .stream()
+                                        .map(this::convertToPassenger)
+                                        .toList()
+                        );
                     }
 
-                    return Mono.fromCallable(() -> {
-                        flightClient.updateAvailableSeats(flightId, flight.getAvailableSeats() - requestedSeats);
-                        return ticket;
-                    })
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .flatMap(savedTicket -> {
-	                        bookingEventProducer.sendBookingEvent(
-	                            new BookingEvent(
-	                                "BOOKED",
-	                                savedTicket.getPnr(),
-	                                savedTicket.getCustomerEmail(),
-	                                savedTicket.getFlightId(),
-	                                savedTicket.getNumSeats(),
-	                                LocalDateTime.now()
-	                            )
-	                      );
-	                     return Mono.just(savedTicket);
-                    });
-                        
-        });
+                    return Mono.fromRunnable(() ->
+                            flightClient.updateAvailableSeats(
+                                    flightId,
+                                    flight.getAvailableSeats() - requestedSeats))
+                            .subscribeOn(Schedulers.boundedElastic())
+
+                            .then(ticketRepository.save(ticket))
+
+                            .doOnSuccess(savedTicket ->
+                                    bookingEventProducer.sendBookingEvent(
+                                            new BookingEvent(
+                                                    "BOOKED",
+                                                    savedTicket.getPnr(),
+                                                    savedTicket.getCustomerEmail(),
+                                                    savedTicket.getFlightId(),
+                                                    savedTicket.getNumSeats(),
+                                                    LocalDateTime.now()
+                                            )
+                                    )
+                            );
+                });
     }
+
 
     @Override
     public Mono<Ticket> getTicketByPnr(String pnr) {
@@ -115,55 +122,67 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public Mono<String> cancelTicket(String pnr) {
+
         if (pnr == null || pnr.trim().isEmpty()) {
             return Mono.error(new ResourceNotFoundException("PNR cannot be null or empty"));
         }
 
         return ticketRepository.findByPnr(pnr.trim())
-                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Ticket not found with PNR: " + pnr)))
-                .flatMap(ticket -> 
-                    Mono.fromCallable(() -> {
-                        try {
-                            return flightClient.getFlightById(ticket.getFlightId());
-                        } catch (Exception e) {
-                            throw new ResourceNotFoundException("Flight associated with this ticket no longer exists.");
-                        }
-                    })
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .flatMap(flight -> {
-                        if (LocalDateTime.now().plusHours(24).isAfter(flight.getDeparture())) {
-                            return Mono.error(new UnprocessableException(
-                                "Cancellation not allowed within 24 hours of departure"));
-                        }
+                .switchIfEmpty(Mono.error(
+                        new ResourceNotFoundException("Ticket not found with PNR: " + pnr)))
 
-                        ticket.setStatus("CANCELLED");
-                        return Mono.fromCallable(() -> {
-                                    flightClient.updateAvailableSeats(
-                                        flight.getId(), 
-                                        flight.getAvailableSeats() + ticket.getNumSeats()
-                                    );
-                                    return ticket;
-                                })
-                                .subscribeOn(Schedulers.boundedElastic())
-                                .flatMap(savedTicket -> {
+                .flatMap(ticket ->
+                        Mono.fromCallable(() -> {
+                            try {
+                                return flightClient.getFlightById(ticket.getFlightId());
+                            } catch (Exception e) {
+                                throw new ResourceNotFoundException(
+                                        "Flight associated with this ticket no longer exists.");
+                            }
+                        })
+                        .subscribeOn(Schedulers.boundedElastic())
 
-                                    bookingEventProducer.sendBookingEvent(
-                                        new BookingEvent(
-                                            "CANCELLED",
-                                            savedTicket.getPnr(),
-                                            savedTicket.getCustomerEmail(),
-                                            savedTicket.getFlightId(),
-                                            savedTicket.getNumSeats(),
-                                            LocalDateTime.now()
-                                        )
-                                    );
+                        .flatMap(flight -> {
 
-                                    return Mono.just("Ticket cancelled successfully");
-                                });
+                            if (LocalDateTime.now().plusHours(24)
+                                    .isAfter(flight.getDeparture())) {
+                                return Mono.error(new UnprocessableException(
+                                        "Cancellation not allowed within 24 hours of departure"));
+                            }
 
-                    })
+                            Mono<Void> updateSeats =
+                                    Mono.fromRunnable(() ->
+                                            flightClient.updateAvailableSeats(
+                                                    flight.getId(),
+                                                    flight.getAvailableSeats() + ticket.getNumSeats()))
+                                    .subscribeOn(Schedulers.boundedElastic())
+                                    .then();
+
+                            // delete ticket
+                            Mono<Void> deleteTicket =
+                                    ticketRepository.deleteById(ticket.getPnr());
+
+                            return updateSeats
+                                    .then(deleteTicket)
+                                    .doOnSuccess(v ->
+                                            bookingEventProducer.sendBookingEvent(
+                                                    new BookingEvent(
+                                                            "CANCELLED",
+                                                            ticket.getPnr(),
+                                                            ticket.getCustomerEmail(),
+                                                            ticket.getFlightId(),
+                                                            ticket.getNumSeats(),
+                                                            LocalDateTime.now()
+                                                    )
+                                            )
+                                    )
+                                    .thenReturn("Ticket cancelled and removed successfully");
+                        })
                 );
     }
+
+
+
     private String generatePNR() {
         return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
