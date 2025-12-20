@@ -3,6 +3,7 @@ package com.micro.booking.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
@@ -53,6 +54,14 @@ class BookingServiceImplTest {
         flight.setAvailableSeats(10);
 
         when(flightClient.getFlightById("F1")).thenReturn(flight);
+        doNothing().when(flightClient)
+                .updateAvailableSeats(anyString(), anyInt());
+
+        when(ticketRepository.save(any(Ticket.class)))
+                .thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+
+        doNothing().when(bookingEventProducer)
+                .sendBookingEvent(any());
 
         BookingRequest req = new BookingRequest(
                 "Neha", "n@example.com", 1,
@@ -63,6 +72,7 @@ class BookingServiceImplTest {
                 .expectNextMatches(t -> t.getStatus().equals("CONFIRMED"))
                 .verifyComplete();
     }
+
 
     @Test
     void bookFlight_insufficientSeats() {
@@ -138,8 +148,10 @@ class BookingServiceImplTest {
     @Test
     void cancelTicket_success() {
         Ticket ticket = new Ticket();
+        ticket.setPnr("PNR"); // ✅ REQUIRED
         ticket.setFlightId("F1");
         ticket.setNumSeats(1);
+        ticket.setCustomerEmail("n@example.com");
 
         FlightRequest flight = new FlightRequest();
         flight.setId("F1");
@@ -148,13 +160,24 @@ class BookingServiceImplTest {
 
         when(ticketRepository.findByPnr("PNR"))
                 .thenReturn(Mono.just(ticket));
+
+        when(ticketRepository.deleteById("PNR"))
+                .thenReturn(Mono.empty());
+
         when(flightClient.getFlightById("F1"))
                 .thenReturn(flight);
 
+        doNothing().when(flightClient)
+                .updateAvailableSeats(anyString(), anyInt());
+
+        doNothing().when(bookingEventProducer)
+                .sendBookingEvent(any());
+
         StepVerifier.create(bookingService.cancelTicket("PNR"))
-                .expectNext("Ticket cancelled successfully")
+                .expectNext("Ticket cancelled and removed successfully")
                 .verifyComplete();
     }
+
 
     @Test
     void cancelTicket_within24Hours() {
