@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 
 @SpringBootApplication
-@EnableFeignClients(basePackages = "com.micro.booking.client")
+@EnableFeignClients(basePackages = "com.micro.booking")
 public class MicroserviceBookingServiceApplication {
 
 	public static void main(String[] args) {

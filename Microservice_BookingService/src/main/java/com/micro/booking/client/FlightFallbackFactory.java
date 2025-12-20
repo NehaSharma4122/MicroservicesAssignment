@@ -1,10 +1,10 @@
 package com.micro.booking.client;
 
 import com.micro.booking.exception.ResourceNotFoundException;
+import com.micro.booking.exception.ServiceUnavailableException;
 import com.micro.booking.requests.FlightRequest;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import jakarta.ws.rs.ServiceUnavailableException;
 
 import org.springframework.cloud.openfeign.FallbackFactory;
 import org.springframework.stereotype.Component;

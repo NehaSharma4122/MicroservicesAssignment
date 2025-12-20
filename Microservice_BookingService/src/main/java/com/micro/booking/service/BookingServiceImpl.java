@@ -12,6 +12,7 @@ import com.micro.booking.entity.Passenger;
 import com.micro.booking.entity.Ticket;
 import com.micro.booking.event.BookingEvent;
 import com.micro.booking.exception.ResourceNotFoundException;
+import com.micro.booking.exception.ServiceUnavailableException;
 import com.micro.booking.exception.UnprocessableException;
 import com.micro.booking.kafka.BookingEventProducer;
 import com.micro.booking.repository.TicketRepository;
@@ -39,7 +40,9 @@ public class BookingServiceImpl implements BookingService {
         return Mono.fromCallable(() -> {
                     try {
                         return flightClient.getFlightById(flightId);
-                    } catch (Exception e) {
+                    }  catch (ServiceUnavailableException e) {
+                        throw new ServiceUnavailableException("Flight server down"); 
+                    }catch (Exception e) {
                         throw new ResourceNotFoundException("Flight not found with ID: " + flightId);
                     }
                 })

@@ -10,7 +10,7 @@ import com.micro.booking.requests.FlightRequest;
 
 import reactor.core.publisher.Mono;
 
-@FeignClient(name = "flight-service",
+@FeignClient(name = "MICROSERVICE-FLIGHTSERVICE",
 url = "${flight.service.url}",
 fallbackFactory = FlightFallbackFactory.class)
 public interface FlightClient {
